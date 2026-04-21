@@ -33,7 +33,7 @@ jobs:
         run: |
           IHD=$(grep '^ARG IHD_TAG=' Dockerfile | cut -d= -f2)
           GMM=$(grep '^ARG GMM_TAG=' Dockerfile | cut -d= -f2)
-          echo "label=${IHD}+${GMM}" >> "$GITHUB_OUTPUT"
+          echo "label=${IHD}_${GMM}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
