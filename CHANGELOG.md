@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/thadamski/plex-vaapi-driver/compare/v1.0.0...v1.0.1) (2026-04-21)
+
+
+### Bug Fixes
+
+* suppress GCC 15 false-positive array-bounds error in iHD build ([3609182](https://github.com/thadamski/plex-vaapi-driver/commit/360918279c8450ad72079b2682b6173fdf759b63))
+
 # 1.0.0 (2026-04-21)
 
 
