@@ -1,5 +1,5 @@
-ARG IHD_TAG=intel-media-25.4.1
-ARG GMM_TAG=intel-gmmlib-22.5.2
+ARG IHD_TAG=intel-media-26.1.6
+ARG GMM_TAG=intel-gmmlib-22.10.0
 
 FROM alpine:latest AS builder
 ARG IHD_TAG
@@ -17,6 +17,7 @@ RUN git clone --depth=1 --branch "${GMM_TAG}" \
     cmake -S /tmp/gmmlib -B /tmp/gmmlib/build \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_INSTALL_PREFIX=/tmp/sdk \
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
       -DCMAKE_SHARED_LINKER_FLAGS="${LF}" \
       -DCMAKE_EXE_LINKER_FLAGS="${LF}" && \
     cmake --build /tmp/gmmlib/build --target install -- -j$(nproc)
@@ -26,6 +27,7 @@ RUN git clone --depth=1 --branch "${IHD_TAG}" \
     cmake -S /tmp/ihd -B /tmp/ihd/build \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_PREFIX_PATH=/tmp/sdk \
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
       -DBUILD_TESTING=OFF \
       -DMEDIA_RUN_TEST_SUITE=OFF \
       -DCMAKE_SHARED_LINKER_FLAGS="${LF}" \
