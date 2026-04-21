@@ -1,8 +1,10 @@
 # plex-vaapi-driver
 
-[![Build](https://github.com/thadamski/plex-vaapi-driver/actions/workflows/build.yml/badge.svg)](https://github.com/thadamski/plex-vaapi-driver/actions/workflows/build.yml)
+[![Release](https://github.com/thadamski/plex-vaapi-driver/actions/workflows/release.yml/badge.svg)](https://github.com/thadamski/plex-vaapi-driver/actions/workflows/release.yml)
+[![GitHub release](https://img.shields.io/github/v/release/thadamski/plex-vaapi-driver)](https://github.com/thadamski/plex-vaapi-driver/releases/latest)
+[![ghcr.io](https://img.shields.io/badge/ghcr.io-plex--vaapi--driver-blue)](https://github.com/thadamski/plex-vaapi-driver/pkgs/container/plex-vaapi-driver)
 
-Container image providing an Intel iHD VA-API driver compatible with Plex Media Server's bundled musl runtime on Intel Arc / Xe / i915 hardware.
+Container image providing an Intel iHD VA-API driver that is compatible with Plex Media Server's bundled musl runtime. Enables hardware transcoding on Intel Arc / Xe / i915 GPUs in containerised deployments.
 
 ```
 ghcr.io/thadamski/plex-vaapi-driver:latest
@@ -10,20 +12,33 @@ ghcr.io/thadamski/plex-vaapi-driver:latest
 
 ---
 
-## Background
+## Is this for you?
 
-Plex Media Server ships its own musl libc as the dynamic linker for its binaries. This musl build predates version 1.2.3 (released March 2022), which introduced support for [RELR](https://maskray.me/blog/2021-10-31-relative-relocations-and-relr) — a compact encoding for relative relocations (`SHT_RELR` / `.relr.dyn`) that modern toolchains now emit by default.
+If you're running Plex Media Server in a container with an Intel iGPU and hardware transcoding silently fails, look for these symptoms:
 
-When Plex's musl loads a shared library that contains a `.relr.dyn` section, it silently skips those relocations. The affected entries in `.init_array` retain their raw link-time file offsets rather than resolved absolute addresses. The dynamic linker then calls that offset value as a function pointer, immediately faulting.
+- `Plex Transcoder` exits immediately with no useful output
+- Plex dashboard shows software transcoding despite a working GPU
+- `vainfo` works fine on the host but transcoding still fails inside the container
+- Debug logs or `dmesg` show a segfault at a low address like `0x4310`
 
-Alpine's pre-built `intel-media-driver` package — and every one of its transitive C++ dependencies — carries `.relr.dyn` sections. This image builds both `intel-media-driver` and `intel-gmmlib` from source with two required flags:
+This is the fix.
 
-- **`-Wl,-z,nopackrelocs`** — instructs the linker to emit standard `R_X86_64_RELATIVE` entries instead of RELR
-- **`-static-libstdc++ -static-libgcc`** — statically links the C++ runtime, eliminating `libstdc++.so` and `libgcc_s.so` as runtime dependencies (both also carry RELR in current Alpine builds)
+---
 
-The resulting libraries are patched with an RPATH of `/vaapi:/usr/lib/plexmediaserver/lib` so that `iHD_drv_video.so` resolves `libigdgmm` from the shared volume and `libva` / `libdrm` from Plex's own lib directory — with no system libraries involved.
+## Root cause
 
-> **Note on `VADriverVTable`:** Plex's `libva.so.2` is often described as having a patched VA-API struct layout. Disassembly of both Plex's and Alpine's libva confirms their `VADriverVTable` and `VADriverContext` layouts are identical. The driver built here is compiled against Alpine's standard `libva-dev` headers and is fully compatible with Plex's runtime.
+Plex ships its own musl libc as the dynamic linker for its binaries. This build predates musl 1.2.3 (March 2022), which introduced support for [RELR](https://maskray.me/blog/2021-10-31-relative-relocations-and-relr) — a compact relocation encoding (`SHT_RELR` / `.relr.dyn`) that modern toolchains now emit by default.
+
+When Plex's musl loads a shared library with a `.relr.dyn` section, it silently skips those relocations. Entries in `.init_array` retain raw link-time file offsets rather than resolved addresses. The dynamic linker calls one of these values as a function pointer and immediately faults — typically at an address like `0x4310`, which is the file offset of a constructor function, not a valid code address.
+
+Alpine's pre-built `intel-media-driver` package and all of its transitive C++ dependencies carry `.relr.dyn` sections. This image builds both `intel-media-driver` and `intel-gmmlib` from source with:
+
+- **`-Wl,-z,nopackrelocs`** — emits standard `R_X86_64_RELATIVE` relocations instead of RELR
+- **`-static-libstdc++ -static-libgcc`** — eliminates the C++ runtime `.so` dependencies, which also carry RELR in current Alpine builds
+
+The iHD driver is patched with an RPATH of `/vaapi:/usr/lib/plexmediaserver/lib` so it resolves `libigdgmm` from the shared volume and `libva` / `libdrm` directly from Plex's own lib directory.
+
+> **On `VADriverVTable`:** Plex's `libva.so.2` is sometimes described as having a patched VA-API struct layout. Disassembly of both Plex's and Alpine's libva shows their `VADriverVTable` and `VADriverContext` layouts are identical — the driver built here is compiled against standard `libva-dev` headers and is fully compatible with Plex's runtime.
 
 ---
 
@@ -59,17 +74,32 @@ volumes:
     emptyDir: {}
 ```
 
-The Intel GPU device plugin must be running on the node to expose the `gpu.intel.com/i915` resource. Pods accessing `/dev/dri` also require render group membership (typically GID `991`), set via `securityContext.supplementalGroups`.
+**Prerequisites:**
+- [Intel GPU device plugin](https://github.com/intel/intel-device-plugins-for-kubernetes) running on the node to advertise `gpu.intel.com/i915`
+- Pod render group membership: `securityContext.supplementalGroups: [991]`
 
 ---
 
-## Updating versions
+## Image tags
+
+Every release publishes four tags so you can pin at whatever granularity suits your deployment:
+
+| Tag | Example | Updates on |
+|-----|---------|------------|
+| `latest` | `latest` | Every release |
+| `<major>` | `1` | Any `1.x.x` release |
+| `<major>.<minor>` | `1.2` | Any `1.2.x` release |
+| `<major>.<minor>.<patch>` | `1.2.3` | That release only |
+
+---
+
+## Updating driver versions
 
 Driver versions are defined as `ARG` defaults at the top of the `Dockerfile`.
 
 1. Find the latest releases: [intel/media-driver](https://github.com/intel/media-driver/releases) · [intel/gmmlib](https://github.com/intel/gmmlib/releases)
 2. Update `IHD_TAG` and `GMM_TAG` in `Dockerfile`
-3. Push to `main` — CI rebuilds and publishes both `:latest` and a version-pinned tag
+3. Open a PR with a `feat:` commit — semantic-release handles the rest
 
 ---
 
@@ -78,7 +108,7 @@ Driver versions are defined as `ARG` defaults at the top of the `Dockerfile`.
 ```bash
 docker build -t plex-vaapi-driver .
 
-# Override versions
+# Pin specific upstream versions
 docker build \
   --build-arg IHD_TAG=intel-media-26.1.6 \
   --build-arg GMM_TAG=intel-gmmlib-22.10.0 \
@@ -93,5 +123,15 @@ docker build \
 |-----------|---------|
 | intel-media-driver | 26.1.6 |
 | intel-gmmlib | 22.10.0 |
-| Target GPU | Intel Arc / Xe2 (Arrow Lake) — compatible with Broadwell and newer |
-| Tested with | Plex Media Server 1.43.x, `linuxserver/plex:latest` |
+| GPU support | Intel Arc / Xe2 (Arrow Lake) and earlier — Broadwell and newer |
+| Tested with | `linuxserver/plex:latest`, Plex Media Server 1.43.x |
+
+---
+
+## Contributing
+
+Contributions welcome — driver version bumps, platform fixes, or documentation improvements. Please use [Conventional Commits](https://www.conventionalcommits.org) so releases are versioned automatically:
+
+- `fix:` — patch release
+- `feat:` — minor release
+- `feat!:` or `BREAKING CHANGE:` footer — major release
