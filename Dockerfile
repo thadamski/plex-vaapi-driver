@@ -45,6 +45,7 @@ RUN git clone --depth=1 --branch "${IHD_TAG}" \
         -DMEDIA_RUN_TEST_SUITE=OFF \
         "-DCMAKE_SHARED_LINKER_FLAGS=${LDFLAGS}" \
         "-DCMAKE_EXE_LINKER_FLAGS=${LDFLAGS}" \
+        -DCMAKE_CXX_FLAGS="-Wno-error=array-bounds" \
  && cmake --build /build/ihd --target iHD_drv_video -j$(nproc)
 
 # Set RPATH so iHD resolves libva + libdrm from Plex's lib directory at
